@@ -103,6 +103,33 @@ def parse_gasoil(html: str) -> dict:
     return r
 
 
+TV_URL = ("https://scanner.tradingview.com/symbol?symbol=ICEEUR:ULS1!"
+          "&fields=close,change,change_abs,high,low,description,update_time,expiration")
+EN_MONTHS = dict(Jan="F", Feb="G", Mar="H", Apr="J", May="K", Jun="M", Jul="N",
+                 Aug="Q", Sep="U", Oct="V", Nov="X", Dec="Z")
+
+
+def gasoil_tradingview() -> dict:
+    """Запасне джерело: TradingView, ICE Low Sulphur Gasoil, найближчий контракт (ULS1!)."""
+    p = json.loads(fetch(TV_URL))
+    last = float(p["close"])
+    chg = float(p.get("change_abs") or 0)
+    r = {"last": last, "change": chg, "change_pct": round(float(p.get("change") or 0), 2),
+         "prev_close": round(last - chg, 2), "day_low": p.get("low"), "day_high": p.get("high")}
+    if p.get("update_time"):
+        ts = datetime.fromtimestamp(int(p["update_time"]), tz=timezone.utc)
+        r["quote_time"] = ts.astimezone(KYIV).strftime("%H:%M:%S")
+    m = re.search(r"\((\w{3}) (\d{4})\)", p.get("description", ""))
+    if m and m.group(1) in EN_MONTHS:
+        code = EN_MONTHS[m.group(1)]
+        r["contract"] = f"{MONTHS[code]} '{m.group(2)[2:]} (LGO{code}{m.group(2)[3]})"
+    else:
+        r["contract"] = "найближчий контракт"
+    if not (100 < last < 5000):
+        raise ValueError(f"неправдоподібна ціна {last}")
+    return r
+
+
 def main() -> int:
     old = json.loads(DATA.read_text(encoding="utf-8")) if DATA.exists() else {}
     now = datetime.now(KYIV).replace(microsecond=0)
@@ -121,7 +148,13 @@ def main() -> int:
         errors["okko"] = str(e)[:200]
 
     try:
-        gas = parse_gasoil(fetch(URL_GAS))
+        try:
+            gas = parse_gasoil(fetch(URL_GAS))
+            new["gasoil_source"] = "ru.investing.com"
+        except Exception as e1:  # noqa: BLE001
+            print(f"investing.com: {e1}; пробую TradingView")
+            gas = gasoil_tradingview()
+            new["gasoil_source"] = "TradingView (ICE)"
         new["gasoil"] = {**old.get("gasoil", {}), **{k: v for k, v in gas.items() if v is not None}}
         new["gasoil_at"] = now.isoformat()
         hist = old.get("history", [])

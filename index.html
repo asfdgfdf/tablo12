@@ -87,7 +87,7 @@ footer{display:flex;justify-content:space-between;color:#93a198;font-size:.78em;
   </main>
   <footer>
     <span><i class="dot" id="dot"></i><span id="fresh">Завантаження…</span></span>
-    <span>Джерела: okko.ua/fuels · ru.investing.com · оновлення кожні ~10 хв</span>
+    <span id="src">Джерела: okko.ua/fuels · ru.investing.com · оновлення кожні ~10 хв</span>
   </footer>
 </div>
 
@@ -203,6 +203,7 @@ footer{display:flex;justify-content:space-between;color:#93a198;font-size:.78em;
     var errs = [];
     if (D.errors && D.errors.gasoil) errs.push("investing.com недоступний");
     if (D.errors && D.errors.okko) errs.push("okko.ua недоступний");
+    $("src").textContent = "Джерела: okko.ua/fuels · " + (D.gasoil_source || "ru.investing.com") + " · оновлення кожні ~10 хв";
     var f = $("fresh"); f.textContent = txt + (errs.length ? " · " + errs.join(", ") : "") + (stale ? " · дані застаріли" : "");
     f.className = (errs.length || stale) ? "err" : "";
   }
