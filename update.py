@@ -16,7 +16,10 @@ KYIV = ZoneInfo("Europe/Kyiv")
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data.json"
 URL_OKKO = "https://www.okko.ua/fuels"
+TOKA_STATION_ID = 1180  # TOKA #2101 FOOD GARAGE Fast Charger (id на toka.energy/mapa)
+URL_TOKA = "https://toka.energy/map/stations/{}"
 URL_EV = "https://www.okko.ua/api/uk/fuel-map"
+URL_EV_HTML = "https://www.okko.ua/fuel-map"
 URL_OREE = "https://www.oree.com.ua/index.php/main/get_uah_prices"
 URL_USD_DAY = "https://charts.finance.ua/ua/currency/data-daily?for=interbank&source=1&indicator=usd"
 URL_USD_ARC = "https://charts.finance.ua/ua/currency/data-archive?for=interbank&source=1&indicator=usd"
@@ -172,6 +175,31 @@ def fetch_usd() -> dict:
     return {"now": cur, "days": [x for x in days if x["date"] != cur["date"]][-5:]}
 
 
+def parse_ev_html(html: str) -> dict:
+    """Запасний варіант: ціни CCS 2 з HTML сторінки карти (дані вбудовані в сторінку)."""
+    t = html.replace("\\u002F", "/").replace("\\u003C", "<").replace("\\u003E", ">")
+    rx = re.compile(r"CCS[^–\-<]*[–\-]\s*(\d+)\s*кВт[^<]*?Ціна:\s*([\d.,]+)\s*грн/кВт[^<]*?Статус:\s*([^\s.<|]+)")
+    prices, free = [], 0
+    for m in rx.finditer(t):
+        prices.append(float(m.group(2).replace(",", ".")))
+        free += m.group(3).lower().startswith("вільн")
+    if not prices:
+        raise ValueError("не знайдено цін CCS 2")
+    mode = max(set(prices), key=prices.count)
+    return {"price": mode, "min": min(prices), "max": max(prices), "ports": len(prices), "free": free}
+
+
+def fetch_toka() -> dict:
+    """Ціна CCS 2 на станції TOKA #2101 FOOD GARAGE з toka.energy/mapa."""
+    d = json.loads(fetch(URL_TOKA.format(TOKA_STATION_ID)))
+    ports = [p for p in d.get("ports", []) if "CCS" in (p.get("title") or "").upper()]
+    if not ports:
+        raise ValueError("на станції немає порту CCS 2")
+    p = ports[0]
+    return {"price": float(p["price"]), "power": p.get("power"), "status": p.get("status"),
+            "station": d.get("name"), "address": d.get("address")}
+
+
 def ru_num(s: str) -> float:
     s = s.replace("−", "-").replace(".", "").replace(",", ".")
     return float(re.sub(r"[^\d.\-+]", "", s))
@@ -252,7 +280,7 @@ def main() -> int:
         errors["okko"] = str(e)[:200]
 
     try:
-        ev = parse_ev(fetch(URL_EV))
+        ev = fetch_toka()
         old_ccs = (old.get("fuels") or {}).get("ccs2")
         if old_ccs is not None and abs(old_ccs - ev["price"]) > 0.001:
             new["fuels_prev"] = {**(new.get("fuels_prev") or old.get("fuels") or {}), "ccs2": old_ccs}
