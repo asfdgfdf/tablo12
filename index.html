@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Пальне ОККО і Gasoil</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;600&family=Unbounded:wght@500;700&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Табло для ТВ 16:9: зліва ціни АЗК (як стела), справа котирування Gasoil з графіком.
+   Сумісність зі старими браузерами Smart TV: flexbox, без CSS grid; значення-запаски перед clamp(). */
+:root{--bg:#0d1210;--panel:#141b17;--fg:#eef3ee;--muted:#93a198;--line:#26302a;--accent:#8fd19e;--up:#ff8a70;--down:#6fd39a;--warn:#f2c14e}
+html,body{height:100%;margin:0}
+body{background:#0d1210;color:#eef3ee;font-family:"Golos Text","Segoe UI",Roboto,Arial,sans-serif;font-size:18px;font-size:clamp(14px,1.05vw,22px);line-height:1.35;overflow:hidden}
+.num{font-family:"JetBrains Mono",Consolas,"DejaVu Sans Mono",monospace}
+.screen{height:100%;box-sizing:border-box;padding:2vw 2.2vw;display:flex;flex-direction:column}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1.6vw}
+h1{font-family:"Unbounded","Golos Text",Arial,sans-serif;font-weight:700;font-size:2.2vw;margin:0}
+.clock{font-weight:700;font-size:2.4vw;text-align:right}
+.date{color:#93a198;font-size:.85em;text-align:right}
+main{flex:1;display:flex;min-height:0}
+.panel{background:#141b17;border:1px solid #26302a;border-radius:.8vw;padding:1.4vw;display:flex;flex-direction:column;min-width:0;box-sizing:border-box}
+.left{flex:1;margin-right:1.6vw}
+.right{flex:1.25}
+h2{font-family:"Unbounded","Golos Text",Arial,sans-serif;font-weight:500;font-size:.8em;letter-spacing:.08em;text-transform:uppercase;color:#93a198;margin:0 0 .8vw}
+.board{flex:1;display:flex;flex-direction:column;justify-content:space-around}
+.row{display:flex;align-items:center;padding:.5vw 0;border-top:1px solid #26302a}
+.row:first-child{border-top:0}
+.sw{width:1vw;height:1vw;min-width:12px;min-height:12px;border-radius:50%;margin-right:1vw;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}
+.name{flex:1;font-weight:600;font-size:1.25em}
+.name small{display:block;font-weight:400;font-size:.62em;color:#93a198}
+.p{font-weight:700;font-size:2.3em;letter-spacing:-.02em;line-height:1.05}
+.d{font-size:.8em;width:6em;text-align:right;color:#93a198}
+.up{color:#ff8a70!important}.down{color:#6fd39a!important}
+.unit{color:#93a198;font-size:.8em;margin:.6vw 0 0}
+.gas-top{display:flex;justify-content:space-between;align-items:baseline}
+.contract{color:#93a198;font-size:.9em}
+.big{display:flex;align-items:baseline;flex-wrap:wrap;margin:.4vw 0 1vw}
+.val{font-weight:700;font-size:6.4vw;letter-spacing:-.04em;line-height:.95;margin-right:1vw}
+.cur{color:#93a198;font-size:1.1em;margin-right:1.4vw}
+.chg{font-weight:700;font-size:1.7em}
+.stats{display:flex}
+.stat{flex:1;border-top:1px solid #26302a;padding-top:.5vw;margin-right:.8vw}
+.stat:last-child{margin-right:0}
+.stat b{display:block;font-size:1.2em}
+.stat span{color:#93a198;font-size:.78em}
+.chart{flex:1;min-height:120px;position:relative;margin-top:1vw}
+.chart svg{position:absolute;left:0;top:0;width:100%;height:100%}
+footer{display:flex;justify-content:space-between;color:#93a198;font-size:.78em;margin-top:1.4vw}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#6fd39a;margin-right:8px;vertical-align:middle}
+.dot.stale{background:#f2c14e}
+.err{color:#f2c14e}
+@media (max-width:820px){
+  body{overflow:auto;font-size:15px}
+  .screen{height:auto;padding:16px}
+  main{flex-direction:column}
+  .left{margin:0 0 16px}
+  h1{font-size:20px}.clock{font-size:20px}.val{font-size:44px}
+  .stats{flex-wrap:wrap}.stat{flex:0 0 45%;margin-bottom:8px}
+  .chart{height:180px;flex:none}
+  footer{flex-direction:column}
+}
+</style>
+</head>
+<body>
+<div class="screen">
+  <header>
+    <h1>Пальне ОККО · London Gas Oil</h1>
+    <div><div class="clock num" id="clock">--:--</div><div class="date" id="date"></div></div>
+  </header>
+  <main>
+    <section class="panel left">
+      <h2>Ціни на АЗК ОККО</h2>
+      <div class="board" id="board"></div>
+      <p class="unit">грн за літр · зміна — від попередньої ціни</p>
+    </section>
+    <section class="panel right">
+      <div class="gas-top"><h2>ICE Low Sulphur Gasoil, ф'ючерс</h2><span class="contract" id="contract"></span></div>
+      <div class="big"><span class="val num" id="last">—</span><span class="cur">USD/т</span><span class="chg num" id="chg"></span></div>
+      <div class="stats">
+        <div class="stat"><b class="num" id="prev">—</b><span>Попер. закриття</span></div>
+        <div class="stat"><b class="num" id="lo">—</b><span>Мін. за день</span></div>
+        <div class="stat"><b class="num" id="hi">—</b><span>Макс. за день</span></div>
+        <div class="stat"><b class="num" id="perl">—</b><span>≈ USD/л (1 т = 1183,43 л)</span></div>
+      </div>
+      <div class="chart" id="chart"></div>
+    </section>
+  </main>
+  <footer>
+    <span><i class="dot" id="dot"></i><span id="fresh">Завантаження…</span></span>
+    <span>Джерела: okko.ua/fuels · ru.investing.com · оновлення кожні ~10 хв</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var PRODUCTS = [
+    {key:"pulls100", name:"PULLS 100", kind:"бензин преміум", color:"#9CFF00"},
+    {key:"pullsdp",  name:"PULLS Diesel", kind:"дизель брендовий", color:"#F4F5F7"},
+    {key:"dp",       name:"ДП Євро", kind:"дизель", color:"#FFEA00"},
+    {key:"pulls95",  name:"PULLS 95", kind:"бензин брендовий", color:"#F73C43"},
+    {key:"a95",      name:"А-95", kind:"бензин", color:"#1EACFF"},
+    {key:"gas",      name:"ГАЗ", kind:"автогаз", color:"#2EFAD5"},
+    {key:"adblue",   name:"AdBlue", kind:"реагент SCR", color:"#1EACFF"}
+  ];
+  var D = null;
+  function $(id){ return document.getElementById(id); }
+  function pad(n){ return (n<10?"0":"")+n; }
+  // Форматування без Intl (старі ТВ-браузери): 1 406,63
+  function fmt(n, d){
+    if (n === null || n === undefined || isNaN(n)) return "—";
+    d = d === undefined ? 2 : d;
+    var s = Math.abs(n).toFixed(d).split("."), i = s[0], out = "";
+    while (i.length > 3){ out = " " + i.slice(-3) + out; i = i.slice(0, -3); }
+    return (n < 0 ? "−" : "") + i + out + (d ? "," + s[1] : "");
+  }
+  function sgn(n){ return (n>0?"+":n<0?"−":"") + fmt(Math.abs(n)); }
+  // Київський час без Intl: UTC + зсув (літо +3 з останньої неділі березня до останньої неділі жовтня)
+  function lastSunday(y, m){ var d = new Date(Date.UTC(y, m+1, 0)); d.setUTCDate(d.getUTCDate() - d.getUTCDay()); return d; }
+  function kyiv(date){
+    var y = date.getUTCFullYear();
+    var s = lastSunday(y, 2); s.setUTCHours(1); var e = lastSunday(y, 9); e.setUTCHours(1);
+    var off = (date >= s && date < e) ? 3 : 2;
+    return new Date(date.getTime() + off*3600000); // читати через getUTC*
+  }
+  var DAYS = ["неділя","понеділок","вівторок","середа","четвер","п'ятниця","субота"];
+  var MONTHS = ["січня","лютого","березня","квітня","травня","червня","липня","серпня","вересня","жовтня","листопада","грудня"];
+  function hm(d){ var k = kyiv(d); return pad(k.getUTCHours()) + ":" + pad(k.getUTCMinutes()); }
+  function dmhm(d){ var k = kyiv(d); return pad(k.getUTCDate()) + "." + pad(k.getUTCMonth()+1) + " " + pad(k.getUTCHours()) + ":" + pad(k.getUTCMinutes()); }
+  function parseISO(s){ var t = Date.parse(s); return isNaN(t) ? null : new Date(t); }
+
+  function renderBoard(){
+    var b = $("board"); b.innerHTML = "";
+    var f = D.fuels || {}, pf = D.fuels_prev || null;
+    for (var i=0;i<PRODUCTS.length;i++){
+      var p = PRODUCTS[i], v = f[p.key], pv = pf ? pf[p.key] : null;
+      var row = document.createElement("div"); row.className = "row";
+      var sw = document.createElement("i"); sw.className = "sw"; sw.style.background = p.color;
+      var nm = document.createElement("span"); nm.className = "name"; nm.appendChild(document.createTextNode(p.name));
+      var sm = document.createElement("small"); sm.appendChild(document.createTextNode(p.kind)); nm.appendChild(sm);
+      var pr = document.createElement("span"); pr.className = "p num"; pr.appendChild(document.createTextNode(fmt(v)));
+      var dl = document.createElement("span"); dl.className = "d num";
+      if (v != null && pv != null && Math.abs(v-pv) > 0.001){ dl.className += v>pv ? " up" : " down"; dl.appendChild(document.createTextNode((v>pv?"▲ ":"▼ ")+sgn(v-pv))); }
+      row.appendChild(sw); row.appendChild(nm); row.appendChild(pr); row.appendChild(dl);
+      b.appendChild(row);
+    }
+  }
+
+  function renderGas(){
+    var g = D.gasoil || {};
+    $("contract").textContent = g.contract || "";
+    $("last").textContent = fmt(g.last);
+    var c = $("chg");
+    c.textContent = (g.change>0?"▲ ":g.change<0?"▼ ":"") + sgn(g.change) + " (" + (g.change_pct>0?"+":g.change_pct<0?"−":"") + fmt(Math.abs(g.change_pct)) + "%)";
+    c.className = "chg num " + (g.change>0?"up":g.change<0?"down":"");
+    $("prev").textContent = fmt(g.prev_close != null ? g.prev_close : g.last - g.change);
+    $("lo").textContent = fmt(g.day_low);
+    $("hi").textContent = fmt(g.day_high);
+    $("perl").textContent = fmt(g.last/1183.43, 3);
+  }
+
+  function renderChart(){
+    var el = $("chart"), h = [], src = D.history || [];
+    for (var i=0;i<src.length;i++){ var t = parseISO(src[i].t); if (t && src[i].v != null) h.push({t:t.getTime(), v:src[i].v}); }
+    var W = el.clientWidth || 600, H = el.clientHeight || 200;
+    if (h.length < 2){
+      el.innerHTML = '<svg viewBox="0 0 '+W+' '+H+'"><text x="'+(W/2)+'" y="'+(H/2)+'" fill="#93a198" text-anchor="middle" font-size="14">Графік з\'явиться після кількох оновлень</text></svg>';
+      return;
+    }
+    // показуємо останні 24 години
+    var cut = h[h.length-1].t - 24*3600000; var hh = [];
+    for (i=0;i<h.length;i++) if (h[i].t >= cut) hh.push(h[i]);
+    if (hh.length >= 2) h = hh;
+    var padL=64, padR=16, padT=12, padB=26, mn=Infinity, mx=-Infinity;
+    for (i=0;i<h.length;i++){ mn=Math.min(mn,h[i].v); mx=Math.max(mx,h[i].v); }
+    if (mx-mn<1){ mn-=1; mx+=1; }
+    var sp=mx-mn; mn-=sp*.08; mx+=sp*.08;
+    var t0=h[0].t, t1=h[h.length-1].t;
+    function X(t){ return padL+(W-padL-padR)*((t-t0)/((t1-t0)||1)); }
+    function Y(v){ return padT+(H-padT-padB)*(1-(v-mn)/(mx-mn)); }
+    var path="", lx=0, ly=0;
+    for (i=0;i<h.length;i++){ lx=X(h[i].t); ly=Y(h[i].v); path += (i?"L":"M")+lx.toFixed(1)+" "+ly.toFixed(1)+" "; }
+    var area = path + "L"+lx.toFixed(1)+" "+(H-padB)+" L"+X(t0).toFixed(1)+" "+(H-padB)+" Z";
+    var grid="";
+    for (i=0;i<=3;i++){ var v=mn+(mx-mn)*i/3, y=Y(v); grid+='<line x1="'+padL+'" x2="'+(W-padR)+'" y1="'+y+'" y2="'+y+'" stroke="#26302a"/><text x="'+(padL-8)+'" y="'+(y+4)+'" fill="#93a198" font-size="12" text-anchor="end">'+Math.round(v)+'</text>'; }
+    el.innerHTML = '<svg viewBox="0 0 '+W+' '+H+'">'+grid+
+      '<path d="'+area+'" fill="#8fd19e" fill-opacity="0.12"/>'+
+      '<path d="'+path+'" fill="none" stroke="#8fd19e" stroke-width="2.5" stroke-linejoin="round"/>'+
+      '<circle cx="'+lx+'" cy="'+ly+'" r="5" fill="#8fd19e"/>'+
+      '<text x="'+padL+'" y="'+(H-6)+'" fill="#93a198" font-size="12">'+dmhm(new Date(t0))+'</text>'+
+      '<text x="'+(W-padR)+'" y="'+(H-6)+'" fill="#93a198" font-size="12" text-anchor="end">'+dmhm(new Date(t1))+'</text></svg>';
+  }
+
+  function tick(){
+    var now = new Date(), k = kyiv(now);
+    $("clock").textContent = hm(now);
+    $("date").textContent = DAYS[k.getUTCDay()] + ", " + k.getUTCDate() + " " + MONTHS[k.getUTCMonth()];
+    if (!D) return;
+    var at = parseISO(D.gasoil_at || D.checked_at || D.updated_at);
+    var stale = !at || (now - at) > 40*60000;
+    $("dot").className = "dot" + (stale ? " stale" : "");
+    var txt = at ? "Дані оновлено " + dmhm(at) : "Немає даних";
+    if (D.gasoil && D.gasoil.quote_time) txt += " · котирування на " + D.gasoil.quote_time;
+    var errs = [];
+    if (D.errors && D.errors.gasoil) errs.push("investing.com недоступний");
+    if (D.errors && D.errors.okko) errs.push("okko.ua недоступний");
+    var f = $("fresh"); f.textContent = txt + (errs.length ? " · " + errs.join(", ") : "") + (stale ? " · дані застаріли" : "");
+    f.className = (errs.length || stale) ? "err" : "";
+  }
+
+  function load(){
+    var x = new XMLHttpRequest();
+    x.open("GET", "data.json?t=" + new Date().getTime(), true);
+    x.onreadystatechange = function(){
+      if (x.readyState !== 4) return;
+      if (x.status === 200){
+        try { D = JSON.parse(x.responseText); renderBoard(); renderGas(); renderChart(); } catch(e){}
+      }
+      tick();
+    };
+    x.send();
+  }
+
+  load(); tick();
+  setInterval(load, 60000);          // перечитувати дані щохвилини
+  setInterval(tick, 10000);
+  window.onresize = function(){ if (D) renderChart(); };
+  setTimeout(function(){ location.reload(); }, 6*3600000); // повне перезавантаження раз на 6 год
+})();
+</script>
+</body>
+</html>
