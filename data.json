@@ -1,5 +1,5 @@
 {
- "checked_at": "2026-10-07T16:38:28+03:00",
+ "checked_at": "2026-10-07T16:52:38+03:00",
  "fuels": {
   "pulls100": 102.9,
   "pullsdp": 102.9,
@@ -9,18 +9,18 @@
   "gas": 46.9,
   "adblue": 59.9
  },
- "fuels_at": "2026-10-07T16:38:28+03:00",
+ "fuels_at": "2026-10-07T16:52:38+03:00",
  "gasoil": {
-  "contract": "Жов '26 (LGOV6)",
-  "last": 1408.13,
-  "change": 78.63,
-  "change_pct": 5.91,
+  "contract": "найближчий контракт",
+  "last": 1428.5,
+  "change": 99.0,
+  "change_pct": 7.45,
   "prev_close": 1329.5,
-  "day_low": 1376.5,
-  "day_high": 1419.75,
-  "quote_time": "15:52:10"
+  "day_low": 1377,
+  "day_high": 1430,
+  "quote_time": "16:52:17"
  },
- "gasoil_at": "2026-10-07T15:53:51+03:00",
+ "gasoil_at": "2026-10-07T16:52:38+03:00",
  "history": [
   {
    "t": "2026-10-07T15:43:00+03:00",
@@ -33,9 +33,12 @@
   {
    "t": "2026-10-07T15:53:51+03:00",
    "v": 1408.13
+  },
+  {
+   "t": "2026-10-07T16:52:38+03:00",
+   "v": 1428.5
   }
  ],
- "errors": {
-  "gasoil": "HTTP Error 403: Forbidden"
- }
+ "errors": {},
+ "gasoil_source": "TradingView (ICE)"
 }
