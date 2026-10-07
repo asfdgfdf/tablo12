@@ -16,6 +16,10 @@ KYIV = ZoneInfo("Europe/Kyiv")
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data.json"
 URL_OKKO = "https://www.okko.ua/fuels"
+URL_EV = "https://www.okko.ua/api/uk/fuel-map"
+URL_OREE = "https://www.oree.com.ua/index.php/main/get_uah_prices"
+URL_USD_DAY = "https://charts.finance.ua/ua/currency/data-daily?for=interbank&source=1&indicator=usd"
+URL_USD_ARC = "https://charts.finance.ua/ua/currency/data-archive?for=interbank&source=1&indicator=usd"
 URL_GAS = "https://ru.investing.com/commodities/london-gas-oil-streaming-chart"
 HISTORY_POINTS = 300  # ≈ 2 доби при оновленні кожні 10 хв
 
@@ -66,6 +70,106 @@ def parse_okko(html: str) -> dict:
     if len(out) < 3:
         raise ValueError("не знайдено цін на сторінці")
     return out
+
+
+def _find_collection(o):
+    if isinstance(o, dict):
+        if isinstance(o.get("collection"), list):
+            return o["collection"]
+        for v in o.values():
+            r = _find_collection(v)
+            if r is not None:
+                return r
+    return None
+
+
+def parse_ev(text: str) -> dict:
+    """Ціна зарядки на порті CCS 2 з карти АЗК ОККО (грн/кВт·год) і кількість вільних портів."""
+    col = _find_collection(json.loads(text)) or []
+    prices, free, total = [], 0, 0
+    rx = re.compile(r"CCS[^–\-]*[–\-]\s*(\d+)\s*кВт.*?Ціна:\s*([\d.,]+)\s*грн/кВт.*?Статус:\s*([^\s.<|]+)", re.S)
+    for st in col:
+        stations = (st.get("attributes") or {}).get("stations") or {}
+        for ports in stations.values():
+            for c in ports or []:
+                if c.get("code") != "CCS_2":
+                    continue
+                txt = re.sub(r"<[^>]+>", " ", c.get("value", ""))
+                for m in rx.finditer(txt):
+                    prices.append(float(m.group(2).replace(",", ".")))
+                    total += 1
+                    free += m.group(3).lower().startswith("вільн")
+    if not prices:
+        raise ValueError("не знайдено цін CCS 2")
+    mode = max(set(prices), key=prices.count)
+    return {"price": mode, "min": min(prices), "max": max(prices), "ports": total, "free": free}
+
+
+def oree_post(data: dict) -> str:
+    import urllib.parse
+    req = urllib.request.Request(URL_OREE, data=urllib.parse.urlencode(data).encode(),
+                                 headers={**HEADERS, "Content-Type": "application/x-www-form-urlencoded",
+                                          "X-Requested-With": "XMLHttpRequest"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read().decode("cp1251", "replace")
+
+
+def parse_oree(html: str, kind: str) -> list:
+    """Індекси РДН з oree.com.ua: [{label, base, pct}] — як на головній сторінці."""
+    txt = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).replace("&nbsp;", " ")
+    pat = r"\b\d{2}\.\d{2}\.\d{4}\b" if kind == "day" else r"\b\d{2}\.\d{4}\b"
+    labels = re.findall(pat, txt.split("BASE")[0])
+    vals = re.findall(r"BASE\s+([\d.]+)[^%]*?(-?[\d.]+)\s*%", txt)
+    out = []
+    for lab, (v, pct) in zip(labels, vals):
+        out.append({"label": lab, "base": float(v), "pct": float(pct)})
+    if not out:
+        raise ValueError("не знайдено індексів BASE")
+    return out
+
+
+def fetch_oree(now) -> dict:
+    from datetime import timedelta
+    month = now.strftime("%m.%Y")
+    days = None
+    for d in (now + timedelta(days=1), now):          # завтра (якщо РДН уже відторгувався) або сьогодні
+        ds = d.strftime("%d.%m.%Y")
+        res = parse_oree(oree_post({"day": ds, "month": month, "type": "day"}), "day")
+        if res and res[-1]["label"] == ds:
+            days = res
+            break
+    if days is None:
+        raise ValueError("немає даних РДН за добу")
+    months = parse_oree(oree_post({"day": now.strftime("%d.%m.%Y"), "month": month, "type": "month"}), "month")
+    # прибрати дублікати місяців (сайт іноді повторює поточний)
+    seen, uniq = set(), []
+    for m in months:
+        if m["label"] not in seen:
+            seen.add(m["label"]); uniq.append(m)
+    return {"days": days, "months": uniq}
+
+
+def fetch_usd() -> dict:
+    """Міжбанк USD/UAH (Укрділінг) з charts.finance.ua: поточний курс і останні дні."""
+    intraday = json.loads(fetch(URL_USD_DAY))
+    archive = json.loads(fetch(URL_USD_ARC))
+    def d(s):  # "10/07/2026" -> "07.10.2026"
+        m, dd, y = s[:10].split("/")
+        return f"{dd}.{m}.{y}"
+    days = [{"date": d(r[0]), "buy": float(r[1]), "sell": float(r[2])} for r in archive[-6:]]
+    if intraday:
+        last = intraday[-1]
+        cur = {"date": d(last[0]), "time": last[0][11:16], "buy": float(last[1]), "sell": float(last[2]),
+               "open_buy": float(intraday[0][1]), "open_sell": float(intraday[0][2])}
+    else:
+        a = archive[-1]
+        cur = {"date": d(a[0]), "time": None, "buy": float(a[1]), "sell": float(a[2])}
+    prev = [x for x in days if x["date"] != cur["date"]]
+    if prev:
+        cur["prev_buy"], cur["prev_sell"], cur["prev_date"] = prev[-1]["buy"], prev[-1]["sell"], prev[-1]["date"]
+    if not (10 < cur["sell"] < 200):
+        raise ValueError(f"неправдоподібний курс {cur['sell']}")
+    return {"now": cur, "days": [x for x in days if x["date"] != cur["date"]][-5:]}
 
 
 def ru_num(s: str) -> float:
@@ -148,6 +252,16 @@ def main() -> int:
         errors["okko"] = str(e)[:200]
 
     try:
+        ev = parse_ev(fetch(URL_EV))
+        old_ccs = (old.get("fuels") or {}).get("ccs2")
+        if old_ccs is not None and abs(old_ccs - ev["price"]) > 0.001:
+            new["fuels_prev"] = {**(new.get("fuels_prev") or old.get("fuels") or {}), "ccs2": old_ccs}
+        new["fuels"] = {**new.get("fuels", {}), "ccs2": ev["price"]}
+        new["ev"] = ev
+    except Exception as e:  # noqa: BLE001
+        errors["ev"] = str(e)[:200]
+
+    try:
         try:
             gas = parse_gasoil(fetch(URL_GAS))
             new["gasoil_source"] = "ru.investing.com"
@@ -162,6 +276,18 @@ def main() -> int:
         new["history"] = hist[-HISTORY_POINTS:]
     except Exception as e:  # noqa: BLE001
         errors["gasoil"] = str(e)[:200]
+
+    try:
+        new["dam"] = fetch_oree(now)
+        new["dam_at"] = now.isoformat()
+    except Exception as e:  # noqa: BLE001
+        errors["oree"] = str(e)[:200]
+
+    try:
+        new["usd"] = fetch_usd()
+        new["usd_at"] = now.isoformat()
+    except Exception as e:  # noqa: BLE001
+        errors["usd"] = str(e)[:200]
 
     new["errors"] = errors
     DATA.write_text(json.dumps(new, ensure_ascii=False, indent=1), encoding="utf-8")
