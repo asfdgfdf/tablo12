@@ -1,0 +1,49 @@
+name: Оновлення табло
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # кожні 10 хв (GitHub може запускати із затримкою 5–15 хв)
+  workflow_dispatch:          # кнопка «Run workflow» для ручного запуску
+  push:
+    branches: [main]
+    paths: ["index.html"]     # оновити сайт одразу після зміни сторінки
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: tablo
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Зібрати дані
+        run: python3 update.py
+
+      - name: Зберегти data.json
+        run: |
+          git config user.name "tablo-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          git diff --cached --quiet || git commit -q -m "Оновлення даних"
+          git push -q || true
+
+      - name: Підготувати сайт
+        run: mkdir -p _site && cp index.html data.json _site/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
